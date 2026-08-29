@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Controle de Presença</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;font-family:Arial,Helvetica,sans-serif;background:#f4f6f8;color:#172033}
+header{background:linear-gradient(135deg,#1d4ed8,#2563eb);color:white;padding:28px 18px}
+.container{max-width:1100px;margin:auto}
+h1{margin:0 0 6px;font-size:28px}.subtitle{opacity:.9}
+main{padding:22px 16px}.grid{display:grid;grid-template-columns:1.1fr .9fr;gap:18px}
+.card{background:#fff;border:1px solid #e1e5ea;border-radius:16px;padding:20px;box-shadow:0 5px 18px rgba(0,0,0,.06)}
+.search{display:flex;gap:9px}.search input{flex:1;padding:14px;border:1px solid #ccd2da;border-radius:10px;font-size:16px;outline:none}.search input:focus{border-color:#2563eb}
+button{border:0;border-radius:10px;padding:12px 15px;font-weight:700;cursor:pointer}
+.primary{background:#2563eb;color:#fff}.secondary{background:#e8eefc;color:#1d4ed8}.danger{background:#fee2e2;color:#b42318}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:15px}
+.stat{border:1px solid #e1e5ea;border-radius:12px;padding:14px}.stat small{color:#667085}.stat strong{display:block;font-size:26px;margin-top:5px}
+.person{border:1px solid #e1e5ea;border-radius:13px;padding:15px;margin-top:12px}
+.person-top{display:flex;justify-content:space-between;gap:12px;align-items:center}.name{font-size:18px;font-weight:800}
+.check{font-weight:700;color:#18723a;white-space:nowrap}.check input{width:19px;height:19px;vertical-align:middle;accent-color:#16a34a}
+.fields{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:12px}.field{background:#f8fafc;padding:10px;border-radius:8px;overflow-wrap:anywhere}.field b{display:block;color:#667085;font-size:12px;margin-bottom:3px}
+.pie-area{display:flex;align-items:center;justify-content:center;gap:25px;flex-wrap:wrap;margin:25px 0}
+.pie{width:180px;height:180px;border-radius:50%;background:conic-gradient(#16a34a 0deg 0deg,#e5e7eb 0deg 360deg);position:relative}.pie:after{content:"";position:absolute;inset:38px;background:#fff;border-radius:50%}
+.legend{line-height:2}.dot{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:6px}.green{background:#16a34a}.gray{background:#e5e7eb}
+.actions{display:flex;gap:8px;flex-wrap:wrap}.empty{text-align:center;color:#667085;padding:20px}
+.notice{background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;padding:12px;border-radius:10px;margin-top:14px;font-size:13px}
+footer{text-align:center;color:#667085;font-size:12px;padding:30px 15px}
+@media(max-width:760px){.grid{grid-template-columns:1fr}.search{flex-direction:column}.stats{grid-template-columns:1fr 1fr}.fields{grid-template-columns:1fr}.person-top{align-items:flex-start;flex-direction:column}}
+</style>
+</head>
+<body>
+<header><div class="container">
+<h1>Controle de Presença</h1>
+<div class="subtitle">Pesquise uma pessoa, consulte os dados e marque sua chegada.</div>
+</div></header>
+
+<main class="container">
+<div class="grid">
+<section class="card">
+<h2>🔎 Pesquisar pessoa</h2>
+<div class="search">
+<input id="search" type="search" placeholder="Digite o nome da pessoa..." autocomplete="off">
+<button class="primary" onclick="pesquisar()">Pesquisar</button>
+</div>
+<div id="resultados"><div class="empty">Digite um nome para começar.</div></div>
+</section>
+
+<section class="card">
+<h2>📊 Controle do evento</h2>
+<div class="stats">
+<div class="stat"><small>Total na lista</small><strong id="total">0</strong></div>
+<div class="stat"><small>Presentes</small><strong id="presentes">0</strong></div>
+<div class="stat"><small>Ausentes</small><strong id="ausentes">0</strong></div>
+</div>
+
+<div class="pie-area">
+<div id="pie" class="pie"></div>
+<div class="legend">
+<div><span class="dot green"></span>Presentes: <b id="pctPresentes">0%</b></div>
+<div><span class="dot gray"></span>Ausentes: <b id="pctAusentes">100%</b></div>
+</div>
+</div>
+
+<div class="actions">
+<button class="secondary" onclick="exportarCSV()">⬇ Exportar presença</button>
+<button class="danger" onclick="limparChecks()">Limpar checks</button>
+</div>
+
+<div class="notice">
+Os checks ficam salvos neste navegador. Se você trocar de computador ou navegador, eles não serão compartilhados automaticamente.
+</div>
+</section>
+</div>
+
+<section class="card" style="margin-top:18px">
+<h2>📋 Resultado da pesquisa</h2>
+<div id="contador" class="empty">Nenhuma pesquisa realizada.</div>
+</section>
+</main>
+
+<footer>Controle de Presença • Dados carregados de dados.json</footer>
+
+<script>
+let PESSOAS=[];
+const CHAVE="controle_presenca_v2";
+const NAME_KEYS=["Nome"];
+let checks=JSON.parse(localStorage.getItem(CHAVE)||"{}");
+let ultimos=[];
+
+function normalizar(texto){
+ return String(texto ?? "")
+  .normalize("NFD")
+  .replace(/[\\u0300-\\u036f]/g,"")
+  .toLowerCase()
+  .trim();
+}
+
+function obterNome(pessoa){
+ for(const chave of NAME_KEYS){
+  if(pessoa[chave] && String(pessoa[chave]).trim()) return String(pessoa[chave]).trim();
+ }
+ const primeira=Object.keys(pessoa)[0];
+ return primeira ? String(pessoa[primeira] ?? "").trim() : "";
+}
+
+function idPessoa(pessoa,index){
+ return normalizar(obterNome(pessoa))+"_"+index;
+}
+
+function escapar(valor){
+ return String(valor ?? "").replace(/[&<>"']/g,c=>({
+ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+ }[c]));
+}
+
+function criarCard(pessoa,index){
+ const id=idPessoa(pessoa,index);
+ const nome=obterNome(pessoa);
+ const campos=Object.entries(pessoa).filter(([chave,valor])=>String(valor).trim());
+ return `
+ <div class="person">
+  <div class="person-top">
+   <div class="name">${escapar(nome || "Sem nome")}</div>
+   <label class="check">
+    <input type="checkbox" ${checks[id] ? "checked" : ""} onchange="alternar('${id}')">
+    Presente
+   </label>
+  </div>
+  <div class="fields">
+   ${campos.map(([chave,valor])=>`
+    <div class="field">
+     <b>${escapar(chave)}</b>
+     ${escapar(valor)}
+    </div>`).join("")}
+  </div>
+ </div>`;
+}
+
+function pesquisar(){
+ const busca=normalizar(document.getElementById("search").value);
+ if(!busca){
+  ultimos=[];
+  document.getElementById("resultados").innerHTML='<div class="empty">Digite um nome para começar.</div>';
+  document.getElementById("contador").textContent="Nenhuma pesquisa realizada.";
+  return;
+ }
+
+ ultimos=PESSOAS.map((p,i)=>({p,i}))
+  .filter(x=>normalizar(obterNome(x.p)).includes(busca));
+
+ document.getElementById("resultados").innerHTML=ultimos.length
+  ? ultimos.map(x=>criarCard(x.p,x.i)).join("")
+  : '<div class="empty">Nenhuma pessoa encontrada.</div>';
+
+ document.getElementById("contador").textContent=
+  ultimos.length+" resultado(s) encontrado(s).";
+}
+
+function alternar(id){
+ checks[id]=!checks[id];
+ localStorage.setItem(CHAVE,JSON.stringify(checks));
+ atualizarPainel();
+ pesquisar();
+}
+
+function atualizarPainel(){
+ const total=PESSOAS.length;
+ const presentes=Object.values(checks).filter(Boolean).length;
+ const ausentes=Math.max(0,total-presentes);
+ const percentual=total ? Math.round(presentes/total*100) : 0;
+
+ document.getElementById("total").textContent=total;
+ document.getElementById("presentes").textContent=presentes;
+ document.getElementById("ausentes").textContent=ausentes;
+ document.getElementById("pctPresentes").textContent=percentual+"%";
+ document.getElementById("pctAusentes").textContent=(100-percentual)+"%";
+
+ document.getElementById("pie").style.background=
+  `conic-gradient(#16a34a 0deg ${percentual*3.6}deg,#e5e7eb ${percentual*3.6}deg 360deg)`;
+}
+
+function limparChecks(){
+ if(confirm("Tem certeza que deseja limpar todos os checks?")){
+  checks={};
+  localStorage.setItem(CHAVE,"{}");
+  atualizarPainel();
+  pesquisar();
+ }
+}
+
+function exportarCSV(){
+ if(!PESSOAS.length)return;
+ const linhas=PESSOAS.map((p,i)=>({...p,"Presente":checks[idPessoa(p,i)]?"SIM":"NÃO"}));
+ const cabecalho=Object.keys(linhas[0]);
+ const csv="\\ufeff"+cabecalho.join(";")+"\\n"+
+  linhas.map(l=>cabecalho.map(c=>`"${String(l[c]??"").replace(/"/g,'""')}"`).join(";")).join("\\n");
+
+ const blob=new Blob([csv],{type:"text/csv;charset=utf-8"});
+ const link=document.createElement("a");
+ link.href=URL.createObjectURL(blob);
+ link.download="controle_presenca.csv";
+ link.click();
+ URL.revokeObjectURL(link.href);
+}
+
+document.getElementById("search").addEventListener("input",pesquisar);
+document.getElementById("search").addEventListener("keydown",e=>{
+ if(e.key==="Enter") pesquisar();
+});
+
+fetch("dados.json")
+ .then(r=>{
+  if(!r.ok) throw new Error("Não foi possível carregar dados.json");
+  return r.json();
+ })
+ .then(dados=>{
+  PESSOAS=dados;
+  atualizarPainel();
+ })
+ .catch(erro=>{
+  document.getElementById("resultados").innerHTML=
+   '<div class="empty">Erro ao carregar dados.json. Verifique se o arquivo está na mesma pasta do index.html.</div>';
+  console.error(erro);
+ });
+</script>
+</body>
+</html>
