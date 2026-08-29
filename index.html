@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Controle de Presença</title>
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif;background:#f4f6f8;color:#172033}
+header{background:linear-gradient(135deg,#1d4ed8,#2563eb);color:#fff;padding:28px 18px}.container{max-width:1120px;margin:auto}
+h1{margin:0 0 6px}.sub{opacity:.9}main{padding:22px 16px}.grid{display:grid;grid-template-columns:1.15fr .85fr;gap:18px}
+.card{background:#fff;border:1px solid #e1e5ea;border-radius:16px;padding:20px;box-shadow:0 5px 18px #0000000b}
+.search{display:flex;gap:8px}.search input{flex:1;padding:14px;border:1px solid #ccd2da;border-radius:10px;font-size:16px}
+button{border:0;border-radius:10px;padding:12px 15px;font-weight:700;cursor:pointer}.primary{background:#2563eb;color:#fff}.secondary{background:#e8eefc;color:#1d4ed8}.danger{background:#fee2e2;color:#b42318}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:15px}.stat{border:1px solid #e1e5ea;border-radius:12px;padding:14px}.stat small{color:#667085}.stat strong{display:block;font-size:26px;margin-top:4px}
+.person{border:1px solid #e1e5ea;border-radius:13px;padding:15px;margin-top:12px}.top{display:flex;justify-content:space-between;align-items:center;gap:12px}.name{font-size:18px;font-weight:800}
+.check{font-weight:700;color:#18723a;white-space:nowrap}.check input{width:20px;height:20px;vertical-align:middle;accent-color:#16a34a}
+.fields{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:12px}.field{background:#f8fafc;padding:10px;border-radius:8px;overflow-wrap:anywhere}.field b{display:block;color:#667085;font-size:12px;margin-bottom:3px}
+.pie-area{display:flex;align-items:center;justify-content:center;gap:24px;flex-wrap:wrap;margin:24px 0}.pie{width:180px;height:180px;border-radius:50%;background:conic-gradient(#16a34a 0deg 0deg,#e5e7eb 0deg 360deg);position:relative}.pie:after{content:"";position:absolute;inset:38px;background:#fff;border-radius:50%}
+.legend{line-height:2}.dot{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:6px}.green{background:#16a34a}.gray{background:#e5e7eb}
+.actions{display:flex;gap:8px;flex-wrap:wrap}.empty{text-align:center;color:#667085;padding:20px}.status{font-size:13px;margin-top:12px;padding:10px;border-radius:9px;background:#f8fafc}.ok{color:#18723a}.warn{color:#9a3412}
+.notice{background:#eff6ff;color:#1e40af;padding:12px;border-radius:10px;margin-top:14px;font-size:13px}
+@media(max-width:760px){.grid{grid-template-columns:1fr}.search{flex-direction:column}.stats{grid-template-columns:1fr 1fr}.fields{grid-template-columns:1fr}.top{align-items:flex-start;flex-direction:column}}
+</style>
+</head>
+<body>
+<header><div class="container"><h1>Controle de Presença</h1><div class="sub">Pesquisa inteligente e presença compartilhada entre dispositivos</div></div></header>
+<main class="container">
+<div class="grid">
+<section class="card">
+<h2>🔎 Pesquisar pessoa</h2>
+<div class="search"><input id="q" placeholder="Digite o nome..." autocomplete="off"><button class="primary" onclick="pesquisar()">Pesquisar</button></div>
+<div id="resultados"><div class="empty">Carregando lista...</div></div>
+<div id="status" class="status">Conectando ao banco de dados...</div>
+</section>
+<section class="card">
+<h2>📊 Controle do evento</h2>
+<div class="stats"><div class="stat"><small>Total</small><strong id="total">0</strong></div><div class="stat"><small>Presentes</small><strong id="presentes">0</strong></div><div class="stat"><small>Ausentes</small><strong id="ausentes">0</strong></div></div>
+<div class="pie-area"><div id="pie" class="pie"></div><div class="legend"><div><span class="dot green"></span>Presentes: <b id="pp">0%</b></div><div><span class="dot gray"></span>Ausentes: <b id="pa">100%</b></div></div></div>
+<div class="actions"><button class="secondary" onclick="exportarCSV()">⬇ Exportar presença</button><button class="danger" onclick="limparChecks()">Limpar checks</button></div>
+<div class="notice">A presença é salva no banco de dados compartilhado. Assim, o mesmo resultado aparece no celular, em outro navegador e em outro computador.</div>
+</section>
+</div>
+<section class="card" style="margin-top:18px"><h2>📋 Resultado da pesquisa</h2><div id="contador" class="empty">Nenhuma pesquisa realizada.</div></section>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+<script>
+let pessoas=[],ultimos=[],supabaseClient=null,modo="local";
+function n(s){return String(s??"").normalize("NFD").replace(/[\\u0300-\\u036f]/g,"").toLowerCase().trim()}
+function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+function nome(p){return p.nome||p.Nome||p["Nome"]||""}
+function id(p){return p.id}
+function card(p){
+ let d=p.dados||p; let fields=Object.entries(d).filter(([k,v])=>String(v).trim() && n(k)!=="nome");
+ return `<div class="person"><div class="top"><div class="name">${esc(nome(p))}</div><label class="check"><input type="checkbox" ${p.presente?"checked":""} onchange="toggle(${p.id},this.checked)"> Presente</label></div><div class="fields">${fields.map(([k,v])=>`<div class="field"><b>${esc(k)}</b>${esc(v)}</div>`).join("")}</div></div>`
+}
+function pesquisar(){
+ let q=n(document.getElementById("q").value);
+ if(!q){ultimos=[];document.getElementById("resultados").innerHTML='<div class="empty">Digite um nome para começar.</div>';document.getElementById("contador").textContent="Nenhuma pesquisa realizada.";return}
+ let termos=q.split(/\\s+/).filter(Boolean);
+ ultimos=pessoas.filter(p=>{let nn=n(nome(p));return nn.includes(q)||termos.every(t=>nn.includes(t))});
+ document.getElementById("resultados").innerHTML=ultimos.length?ultimos.map(card).join(""):'<div class="empty">Nenhuma pessoa encontrada.</div>';
+ document.getElementById("contador").textContent=ultimos.length+" resultado(s) encontrado(s).";
+}
+async function toggle(id,checked){
+ if(modo==="supabase"){
+  const {error}=await supabaseClient.from("pessoas").update({presente:checked,atualizado_em:new Date().toISOString()}).eq("id",id);
+  if(error){alert("Não foi possível salvar a presença.");console.error(error);return}
+ }else{
+  const p=pessoas.find(x=>x.id===id);if(p)p.presente=checked;
+  localStorage.setItem("presenca_fallback",JSON.stringify(pessoas));
+ }
+ atualizar();pesquisar();
+}
+function atualizar(){
+ let total=pessoas.length,p=pessoas.filter(x=>x.presente).length,a=total-p,pct=total?Math.round(p/total*100):0;
+ document.getElementById("total").textContent=total;document.getElementById("presentes").textContent=p;document.getElementById("ausentes").textContent=a;
+ document.getElementById("pp").textContent=pct+"%";document.getElementById("pa").textContent=(100-pct)+"%";
+ document.getElementById("pie").style.background=`conic-gradient(#16a34a 0deg ${pct*3.6}deg,#e5e7eb ${pct*3.6}deg 360deg)`;
+}
+async function carregar(){
+ try{
+  if(!SUPABASE_URL.startsWith("http")||SUPABASE_KEY.includes("COLE_AQUI"))throw new Error("config");
+  supabaseClient=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
+  const {data,error}=await supabaseClient.from("pessoas").select("*").order("id");
+  if(error)throw error;
+  pessoas=data||[];modo="supabase";
+  document.getElementById("status").innerHTML='<span class="ok">● Banco compartilhado conectado.</span>';
+  atualizar();
+  supabaseClient.channel("presencas").on("postgres_changes",{event:"*",schema:"public",table:"pessoas"},payload=>{
+    const i=pessoas.findIndex(x=>x.id===payload.new?.id);
+    if(i>=0)pessoas[i]=payload.new; else if(payload.eventType==="INSERT")pessoas.push(payload.new);
+    atualizar();pesquisar();
+  }).subscribe();
+ }catch(e){
+  const raw=JSON.parse(localStorage.getItem("presenca_fallback")||"null");
+  if(raw)pessoas=raw;
+  else pessoas=[];
+  modo="local";
+  document.getElementById("status").innerHTML='<span class="warn">● Banco ainda não configurado. Configure o Supabase conforme o README.</span>';
+  atualizar();
+ }
+}
+async function limparChecks(){
+ if(!confirm("Limpar todos os checks de presença?"))return;
+ if(modo==="supabase"){
+  const {error}=await supabaseClient.from("pessoas").update({presente:false,atualizado_em:new Date().toISOString()}).neq("id",0);
+  if(error){alert("Erro ao limpar presença.");return}
+  pessoas=pessoas.map(p=>({...p,presente:false}));
+ }else{pessoas=pessoas.map(p=>({...p,presente:false}));localStorage.setItem("presenca_fallback",JSON.stringify(pessoas))}
+ atualizar();pesquisar();
+}
+function exportarCSV(){
+ if(!pessoas.length)return;
+
+ const rows=pessoas.map(p=>{
+  let r={...(p.dados||{})};
+  r["Presente"]=p.presente?"SIM":"NÃO";
+  return r;
+ });
+
+ const headers=Object.keys(rows[0]);
+
+ // UTF-8 com BOM + ponto e vírgula + quebra de linha CRLF:
+ // formato compatível com Excel em português.
+ const csv="\uFEFF"+headers.join(";")+"\r\n"+
+  rows.map(r=>headers.map(k=>{
+   const valor=String(r[k]??"").replace(/"/g,'""');
+   return `"${valor}"`;
+  }).join(";")).join("\r\n");
+
+ const blob=new Blob([csv],{type:"text/csv;charset=utf-8"});
+ const link=document.createElement("a");
+ link.href=URL.createObjectURL(blob);
+ link.download="controle_presenca.csv";
+ document.body.appendChild(link);
+ link.click();
+ link.remove();
+ setTimeout(()=>URL.revokeObjectURL(link.href),1000);
+}
+document.getElementById("q").addEventListener("input",pesquisar);
+document.getElementById("q").addEventListener("keydown",e=>{if(e.key==="Enter")pesquisar()});
+carregar();
+</script>
+</body></html>
